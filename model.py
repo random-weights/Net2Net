@@ -78,8 +78,8 @@ class BuildModel():
 
         # if id = 1 write random weights to directory
         if self.id == 1:
-            w0 = np.random.normal(loc = 0.0, scale = 0.1, size=[784,self.ls_units[0]])
-            w1 = np.random.normal(loc = 0.0, scale = 0.1, size = [self.ls_units[0],10])
+            w0 = np.random.normal(loc = 0.0, scale = 0.1, size=[784,self.ls_units[1]])
+            w1 = np.random.normal(loc = 0.0, scale = 0.1, size = [self.ls_units[1],10])
             np.savetxt(self.dir+"/w0.csv",w0,delimiter=",")
             np.savetxt(self.dir+"/w1.csv",w1,delimiter= ",")
 
@@ -135,13 +135,36 @@ class BuildModel():
 
                 print("Epoch: ",i,"\tcost: ",loss,"\ttrain_acc: ",train_acc,"\ttest_acc: ",test_acc)
 
+            self.new_kernel = sess.run(self.kernel)
+            for arr in self.new_kernel:
+                print(arr.shape)
+
+
+    def write_weights(self):
+        temp_count = 0
+        for arr in self.new_kernel:
+            temp_fname = temp_fname = self.dir +"/w"+str(temp_count)+".csv"
+            os.remove(temp_fname)
+            np.savetxt(temp_fname,arr,delimiter=",")
+            temp_count += 1
+
+
+def net2Wider():
+    
+
+def net2Deeper():
+    pass
+
 
 
 def main():
     history = History()
     graphinfo = history.get_graphinfo(model_id = 1)
     model1 = BuildModel(graphinfo)
-    model1.train(5)
+    model1.train(20)
+    model1.write_weights()
+
+
 
 main()
 
