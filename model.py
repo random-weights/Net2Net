@@ -1,7 +1,5 @@
 import tensorflow as tf
 import numpy as np
-import itertools
-import time
 import os
 import shutil
 
@@ -63,6 +61,7 @@ class Data():
     def __init__(self,x_fname,y_fname):
         self.X = np.genfromtxt(x_fname,delimiter=",").astype(np.float32).reshape(-1,784)
         self.Y = np.genfromtxt(y_fname,delimiter=",").astype(np.float32).reshape(-1,10)
+
 
 class BuildModel():
     def __init__(self,graph_info):
@@ -149,22 +148,79 @@ class BuildModel():
             temp_count += 1
 
 
-def net2Wider():
-    
+def net2Wider(prev_graphinfo,next_graphinfo):
+    """
+    Will write modified weights to the sub-directory of new graph info
+    :return:
+    """
+    next_layers = next_graphinfo.layers
+    next_units = next_graphinfo.units
+
+    prev_layers = prev_graphinfo.layers
+    prev_units = prev_graphinfo.units
+
+    prev_dir = prev_graphinfo.dest_dir
+    target_dir = next_graphinfo.dest_dir
+
+    try:
+        assert prev_layers == next_layers
+    except AssertionError:
+        print("Layers should remain same in net2wider")
+        return None
+    else:
+        diff = [b - a for a,b in zip(prev_units,next_units)]
+
+        # fetch the weight matrices in all layers
+        weights = [0]*(len(diff)-1)
+        for layer,_ in enumerate(weights):
+            temp_fname = prev_dir+"/w"+str(layer)+".csv"
+            weights[layer] = np.genfromtxt(temp_fname,delimiter=",")
+
+        # when new units are added in layer n, weight matrices of layer(n-1) and layer(n) will be updated.
+        for layer,i in enumerate(diff):
+            if i > 0:
+                # updating the weights in layer(n-1)
+                # new weight matrix will have new columns and existing columns are left undisturbed.
+                total_cols = weights[layer-1].shape[1]
+                print(total_cols)
+                rand_col_idx = np.random.choice(total_cols,size = i, replace = True)
+                rand_cols = weights[layer-1][:,rand_col_idx]
+                weights[layer-1] = np.append(weights[layer-1],rand_cols,axis = 1)
+
+                # updating the weights in layer(n)
+                # this new weight matrix will have new row and existing rows will be updated
+                count_dict = dict()
+                for idx in rand_col_idx:
+                    if idx in count_dict:
+                        count_dict[idx] += 1
+                    else:
+                        count_dict[idx] = 2
+                for idx, count in count_dict.items():
+                    weights[layer][idx,:] = weights[layer][idx,:]/float(count)
+
+                # build new weight matrix
+                for idx in rand_col_idx:
+                    new_row = weights[layer][idx,:]
+                    weights[layer] = np.vstack((weights[layer],new_row))
+
+        # write the updated weight matrices to the target directory
+        for layer,_ in enumerate(weights):
+            temp_fname = target_dir+"/w"+str(layer)+".csv"
+            np.savetxt(temp_fname,weights[layer],delimiter=",")
+
 
 def net2Deeper():
     pass
-
 
 
 def main():
     history = History()
     graphinfo = history.get_graphinfo(model_id = 1)
     model1 = BuildModel(graphinfo)
-    model1.train(20)
+    model1.train(5)
     model1.write_weights()
-
-
+    next_graphinfo = GraphInfo(id = 2,layers = 3, ls_units = [784,6,10])
+    net2Wider(graphinfo,next_graphinfo)
 
 main()
 
