@@ -44,11 +44,10 @@ class GraphInfo:
             # id of the model
             self.id = id
 
-            #dest_dir of model
+            # dest_dir of model
             self.dest_dir = "history/model"+str(self.id)+"/"
 
-
-    def insertLayer(self,after_layer,inplace = False):
+    def insert_layer(self,after_layer,inplace = False):
 
         """
         Inserts a layer after the location given by after_layer
@@ -76,24 +75,29 @@ class GraphInfo:
                 temp_ginfo.units.insert(after_layer, prev_layer_units)
                 return temp_ginfo
 
-    def addUnits(self,layer_index,units, inplace = False):
+    def add_units(self,layer_index,units, inplace = False):
         """
         :param layer_index: index of layer where to add units
         :param units: no. of units to add in this layer
         :return: a GraphInfo object, the existing object is not modified
         """
-        temp_ginfo = deepcopy(self)
         try:
             assert units > 0
         except AssertionError as err:
             err.args = err.args + ("Cannot shrink the network, enter a positive number.",)
             raise
         else:
-            temp_ginfo.units[layer_index] += units
-            return temp_ginfo
+            if inplace:
+                self.units[layer_index] += units
+                return None
+            else:
+                temp_ginfo = deepcopy(self)
+                temp_ginfo.units[layer_index] += units
+                return temp_ginfo
 
-    def printInfo(self):
+    def print_info(self):
         print("ID: ",self.id,"\tunits: ",self.units,"\tlayers: ",self.layers)
+        return None
 
 
 class Data:
@@ -195,7 +199,14 @@ class Net2Net:
 
     @staticmethod
     def net2wider(graphinfo,layer_index, units):
-
+        """
+        updated weight matrices are stored as csv files in the same tmp folder.
+        So old weights are deleted. To save a trained model weights use the write_weights method in BuildModel class
+        :param graphinfo: self-explanatory
+        :param layer_index: index of layer(starting at 0) where the units are added.
+        :param units: no. of units to be added.
+        :return: updated weight matrices
+        """
         try:
             assert units > 0
         except AssertionError as err:
@@ -209,9 +220,12 @@ class Net2Net:
                 temp_fname = "temp/"+"w"+str(layer)+".csv"
                 weights.append(np.genfromtxt(temp_fname,delimiter=","))
 
-            """when new units are added in layer_index, weight matrices of layer_index -1 and layer_index will be updated.
-            new weight matrix will have new columns and existing columns are left undisturbed."""
+            """when new units are added in layer<layer_index>, weight matrices of layer<layer_index-1> and 
+            layer<layer_index> will be updated.
+            *   new weight matrix of layer<layer_index-1> will have new columns and existing columns are left undisturbed.
+            *   New weight matrix of layer<layer_index> will have additional rows and existing row will be changed accordingly."""
 
+            # updating weight matrix of layer<layer_index-1>
             # generate <units> random indices.
             total_cols = weights[layer_index - 1].shape[1]
             rand_col_idx = np.random.choice(total_cols,size = units, replace = True)
@@ -221,7 +235,7 @@ class Net2Net:
             # append these randomly selected weights to the existing matrix
             weights[layer_index-1] = np.append(weights[layer_index-1],rand_cols,axis = 1)
 
-            # updating the weights in layer(n)
+            # updating the weights in layer<layer_index>
             # this new weight matrix will have new row and existing rows will be updated
             count_dict = dict()
             for idx in rand_col_idx:
@@ -238,13 +252,15 @@ class Net2Net:
                 weights[layer_index] = np.vstack((weights[layer_index],new_row))
 
             write_temp(weights)
+            return weights
 
     @staticmethod
     def net2deeper(graphinfo, layer_index):
         """
-        Assumes, no. of units in each layer remains the same.
-        :param prev_graphinfo: as the name implies
-        :param next_graphinfo: as the name implies
+        Assumes, no. of units in the new layer is same as the previous layer
+        :param graphinfo: as the name implies
+        :param layer_index: index of layer after which the new layer is created
+        :return weight matrices of all layers including the newly created one.
         """
 
         prev_layers = graphinfo.layers
@@ -256,12 +272,14 @@ class Net2Net:
             temp_fname = "temp/" + "w" + str(layer) + ".csv"
             weights.append(np.genfromtxt(temp_fname, delimiter=","))
 
+        # create identity matrix
         dims = prev_units[layer_index]
         id_matrix = np.identity(dims)
 
         weights.insert(layer_index,id_matrix)
-
         write_temp(weights)
+
+        return weights
 
 
 
