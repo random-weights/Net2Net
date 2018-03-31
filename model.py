@@ -2,9 +2,25 @@ import tensorflow as tf
 import numpy as np
 import os
 import shutil
-from copy import copy, deepcopy
+from copy import deepcopy
 
-class GraphInfo():
+
+def write_temp(weights):
+    try:
+        shutil.rmtree("temp")
+    except Exception:
+        pass
+    finally:
+        os.mkdir("temp")
+
+    temp_destination = "temp/"
+    for count, arr in enumerate(weights):
+        arr = np.array(arr)
+        temp_fname = temp_destination + "w" + str(count) + ".csv"
+        np.savetxt(temp_fname, arr, delimiter=",")
+
+
+class GraphInfo:
     def __init__(self,id,layers,ls_units):
         """
         every instance of Graphinfo will create a new model directory
@@ -27,6 +43,10 @@ class GraphInfo():
 
             # id of the model
             self.id = id
+
+            #dest_dir of model
+            self.dest_dir = "history/model"+str(self.id)+"/"
+
 
     def insertLayer(self,after_layer,inplace = False):
 
@@ -76,42 +96,19 @@ class GraphInfo():
         print("ID: ",self.id,"\tunits: ",self.units,"\tlayers: ",self.layers)
 
 
-class History():
-    def __init__(self):
-        """
-        first instance will have a default config of
-            1 layer and 4 hidden units in that layer
-        """
-        self.history = dict()
-        graph1 = GraphInfo(id = 1, layers = 3, ls_units = [784,4,10])
-        self.add_graphinfo(graph1)
-
-    def add_graphinfo(self,graph_info):
-        """
-        adds model_info to history
-        """
-        id = graph_info.id
-        if id in self.history:
-            print("model already exists in history")
-        else:
-            self.history[id] = graph_info
-
-    def get_graphinfo(self,model_id):
-        """
-        return None if no GraphInfo object exists in history
-        :param model_id: id of model to search for in history
-        :return: a GraphInfo object who's model_id = model_id
-        """
-        return self.history[model_id]
-
-
-class Data():
+class Data:
     def __init__(self,x_fname,y_fname):
         self.X = np.genfromtxt(x_fname,delimiter=",").astype(np.float32).reshape(-1,784)
         self.Y = np.genfromtxt(y_fname,delimiter=",").astype(np.float32).reshape(-1,10)
 
 
-class BuildModel():
+class BuildModel:
+    """
+    By default when a model finishes training, it creates a temp folder.
+    If temp folder already exists, it is deleted and then weights are written.
+
+    To explicity write weight matrices to model directory, use writeWeights() method.
+    """
     def __init__(self,graph_info):
         """
         reads the graph structure form graph_info object,
@@ -127,13 +124,13 @@ class BuildModel():
         if self.id == 1:
             w0 = np.random.normal(loc = 0.0, scale = 0.1, size=[784,self.ls_units[1]])
             w1 = np.random.normal(loc = 0.0, scale = 0.1, size = [self.ls_units[1],10])
-            np.savetxt(self.dir+"/w0.csv",w0,delimiter=",")
-            np.savetxt(self.dir+"/w1.csv",w1,delimiter= ",")
+            np.savetxt(self.dir+"w0.csv",w0,delimiter=",")
+            np.savetxt(self.dir+"w1.csv",w1,delimiter= ",")
 
         # retrieve weights from sub-directory
         self.weights = [0]*(self.layers-1)
         for i in range(self.layers-1):
-            temp_fname = self.dir +"/w"+str(i)+".csv"
+            temp_fname = self.dir +"w"+str(i)+".csv"
             self.weights[i] = tf.constant(np.genfromtxt(temp_fname,delimiter=",").astype(np.float32))
 
     def forward(self,x):
@@ -183,114 +180,89 @@ class BuildModel():
                 print("Epoch: ",i,"\tcost: ",loss,"\ttrain_acc: ",train_acc,"\ttest_acc: ",test_acc)
 
             self.new_kernel = sess.run(self.kernel)
-            for arr in self.new_kernel:
-                print(arr.shape)
-
+            write_temp(self.new_kernel)
 
     def write_weights(self):
         temp_count = 0
         for arr in self.new_kernel:
-            temp_fname = temp_fname = self.dir +"/w"+str(temp_count)+".csv"
+            temp_fname = self.dir +"w"+str(temp_count)+".csv"
             os.remove(temp_fname)
             np.savetxt(temp_fname,arr,delimiter=",")
             temp_count += 1
 
 
-def net2Wider(prev_graphinfo,next_graphinfo):
-    """
-    Will write modified weights to the sub-directory of new graph info
-    """
-    next_layers = next_graphinfo.layers
-    next_units = next_graphinfo.units
+class Net2Net:
 
-    prev_layers = prev_graphinfo.layers
-    prev_units = prev_graphinfo.units
+    @staticmethod
+    def net2wider(graphinfo,layer_index, units):
 
-    prev_dir = prev_graphinfo.dest_dir
-    target_dir = next_graphinfo.dest_dir
+        try:
+            assert units > 0
+        except AssertionError as err:
+            err.args = err.args + ("Cannot shrink, enter a positive number for units",)
+            raise
+        else:
+            prev_layers = graphinfo.layers
+            # fetch the weight matrices in all layers
+            weights = []
+            for layer in range(prev_layers - 1):
+                temp_fname = "temp/"+"w"+str(layer)+".csv"
+                weights.append(np.genfromtxt(temp_fname,delimiter=","))
 
-    try:
-        assert prev_layers == next_layers
-    except AssertionError:
-        print("Layers should remain same in net2wider")
-        return None
-    else:
-        diff = [b - a for a,b in zip(prev_units,next_units)]
+            """when new units are added in layer_index, weight matrices of layer_index -1 and layer_index will be updated.
+            new weight matrix will have new columns and existing columns are left undisturbed."""
+
+            # generate <units> random indices.
+            total_cols = weights[layer_index - 1].shape[1]
+            rand_col_idx = np.random.choice(total_cols,size = units, replace = True)
+
+            rand_cols = weights[layer_index-1][:,rand_col_idx]
+
+            # append these randomly selected weights to the existing matrix
+            weights[layer_index-1] = np.append(weights[layer_index-1],rand_cols,axis = 1)
+
+            # updating the weights in layer(n)
+            # this new weight matrix will have new row and existing rows will be updated
+            count_dict = dict()
+            for idx in rand_col_idx:
+                if idx in count_dict:
+                    count_dict[idx] += 1
+                else:
+                    count_dict[idx] = 2
+            for idx, count in count_dict.items():
+                weights[layer_index][idx,:] = weights[layer_index][idx,:]/float(count)
+
+            # build new weight matrix
+            for idx in rand_col_idx:
+                new_row = weights[layer_index][idx,:]
+                weights[layer_index] = np.vstack((weights[layer_index],new_row))
+
+            write_temp(weights)
+
+    @staticmethod
+    def net2deeper(graphinfo, layer_index):
+        """
+        Assumes, no. of units in each layer remains the same.
+        :param prev_graphinfo: as the name implies
+        :param next_graphinfo: as the name implies
+        """
+
+        prev_layers = graphinfo.layers
+        prev_units = graphinfo.units
 
         # fetch the weight matrices in all layers
-        weights = [0]*(len(diff)-1)
-        for layer,_ in enumerate(weights):
-            temp_fname = prev_dir+"/w"+str(layer)+".csv"
-            weights[layer] = np.genfromtxt(temp_fname,delimiter=",")
+        weights = []
+        for layer in range(prev_layers - 1):
+            temp_fname = "temp/" + "w" + str(layer) + ".csv"
+            weights.append(np.genfromtxt(temp_fname, delimiter=","))
 
-        # when new units are added in layer n, weight matrices of layer(n-1) and layer(n) will be updated.
-        for layer,i in enumerate(diff):
-            if i > 0:
-                # updating the weights in layer(n-1)
-                # new weight matrix will have new columns and existing columns are left undisturbed.
-                total_cols = weights[layer-1].shape[1]
-                print(total_cols)
-                rand_col_idx = np.random.choice(total_cols,size = i, replace = True)
-                rand_cols = weights[layer-1][:,rand_col_idx]
-                weights[layer-1] = np.append(weights[layer-1],rand_cols,axis = 1)
+        dims = prev_units[layer_index]
+        id_matrix = np.identity(dims)
 
-                # updating the weights in layer(n)
-                # this new weight matrix will have new row and existing rows will be updated
-                count_dict = dict()
-                for idx in rand_col_idx:
-                    if idx in count_dict:
-                        count_dict[idx] += 1
-                    else:
-                        count_dict[idx] = 2
-                for idx, count in count_dict.items():
-                    weights[layer][idx,:] = weights[layer][idx,:]/float(count)
+        weights.insert(layer_index,id_matrix)
 
-                # build new weight matrix
-                for idx in rand_col_idx:
-                    new_row = weights[layer][idx,:]
-                    weights[layer] = np.vstack((weights[layer],new_row))
+        write_temp(weights)
 
-        # write the updated weight matrices to the target directory
-        for layer,_ in enumerate(weights):
-            temp_fname = target_dir+"/w"+str(layer)+".csv"
-            np.savetxt(temp_fname,weights[layer],delimiter=",")
-
-
-def net2Deeper(prev_graphinfo, next_graphinfo):
-    """
-    :param prev_graphinfo: as the name implies
-    :param next_graphinfo: as the name implies
-    """
-    next_layers = next_graphinfo.layers
-    next_units = next_graphinfo.units
-
-    prev_layers = prev_graphinfo.layers
-    prev_units = prev_graphinfo.units
-
-    prev_dir = prev_graphinfo.dest_dir
-    target_dir = next_graphinfo.dest_dir
-
-    try:
-        assert prev_layers != next_layers
-    except AssertionError:
-        print("Wrong method called...no.of layers must be different")
-        return None
-    else:
-        diff = next_layers - prev_layers
-        # now figure where to insert this hidden layer.
-
-
-def main():
-    history = History()
-    graphinfo = history.get_graphinfo(model_id = 1)
-    model1 = BuildModel(graphinfo)
-    model1.train(5)
-    model1.write_weights()
-    #next_graphinfo = GraphInfo(id = 2,layers = 3, ls_units = [784,6,10])
-    #net2Wider(graphinfo,next_graphinfo)
-
-
-main()
 
 
 
