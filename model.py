@@ -2,6 +2,7 @@ import tensorflow as tf
 import numpy as np
 import os
 import shutil
+from copy import copy, deepcopy
 
 class GraphInfo():
     def __init__(self,id,layers,ls_units):
@@ -11,21 +12,47 @@ class GraphInfo():
         :param layers: no. of layers including input and output int8
         :param ls_units: a list of no. of units in each layer
         """
-        # no. of hidden layers in the model
-        self.layers = layers
-
-        # no. of units in each layer
-        self.units = ls_units
-
-        # id of the model
-        self.id = id
-
-        self.dest_dir = "history/model"+str(self.id)
-        if not os.path.exists(self.dest_dir):
-            os.makedirs(self.dest_dir)
+        try:
+            assert layers == len(ls_units)
+        except AssertionError as e:
+            e.args = e.args + ("no. of layer inconsistent, check units list. Be sure to include"
+                            " input and output layers",)
+            raise
         else:
-            shutil.rmtree(self.dest_dir, ignore_errors=True)
-            os.makedirs(self.dest_dir)
+            # no. of hidden layers in the model
+            self.layers = layers
+
+            # no. of units in each layer
+            self.units = ls_units
+
+            # id of the model
+            self.id = id
+
+    def insertLayer(self,after_layer):
+        temp_ginfo = deepcopy(self)
+        temp_ginfo.layers += 1
+        prev_layer_units = temp_ginfo.units[after_layer]
+        temp_ginfo.units.insert(after_layer,prev_layer_units)
+        return temp_ginfo
+
+    def addUnits(self,layer_index,units):
+        """
+        :param layer_index: index of layer where to add units
+        :param units: no. of units to add in this layer
+        :return: a GraphInfo object, the existing object is not modified
+        """
+        temp_ginfo = deepcopy(self)
+        try:
+            assert units > 0
+        except AssertionError as err:
+            err.args = err.args + ("Cannot shrink the network, enter a positive number.",)
+            raise
+        else:
+            temp_ginfo.units[layer_index] += units
+            return temp_ginfo
+
+    def printInfo(self):
+        print("ID: ",self.id,"\tunits: ",self.units,"\tlayers: ",self.layers)
 
 
 class History():
@@ -151,7 +178,6 @@ class BuildModel():
 def net2Wider(prev_graphinfo,next_graphinfo):
     """
     Will write modified weights to the sub-directory of new graph info
-    :return:
     """
     next_layers = next_graphinfo.layers
     next_units = next_graphinfo.units
@@ -209,8 +235,28 @@ def net2Wider(prev_graphinfo,next_graphinfo):
             np.savetxt(temp_fname,weights[layer],delimiter=",")
 
 
-def net2Deeper():
-    pass
+def net2Deeper(prev_graphinfo, next_graphinfo):
+    """
+    :param prev_graphinfo: as the name implies
+    :param next_graphinfo: as the name implies
+    """
+    next_layers = next_graphinfo.layers
+    next_units = next_graphinfo.units
+
+    prev_layers = prev_graphinfo.layers
+    prev_units = prev_graphinfo.units
+
+    prev_dir = prev_graphinfo.dest_dir
+    target_dir = next_graphinfo.dest_dir
+
+    try:
+        assert prev_layers != next_layers
+    except AssertionError:
+        print("Wrong method called...no.of layers must be different")
+        return None
+    else:
+        diff = next_layers - prev_layers
+        # now figure where to insert this hidden layer.
 
 
 def main():
@@ -219,8 +265,9 @@ def main():
     model1 = BuildModel(graphinfo)
     model1.train(5)
     model1.write_weights()
-    next_graphinfo = GraphInfo(id = 2,layers = 3, ls_units = [784,6,10])
-    net2Wider(graphinfo,next_graphinfo)
+    #next_graphinfo = GraphInfo(id = 2,layers = 3, ls_units = [784,6,10])
+    #net2Wider(graphinfo,next_graphinfo)
+
 
 main()
 
