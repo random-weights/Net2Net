@@ -28,14 +28,35 @@ class GraphInfo():
             # id of the model
             self.id = id
 
-    def insertLayer(self,after_layer):
-        temp_ginfo = deepcopy(self)
-        temp_ginfo.layers += 1
-        prev_layer_units = temp_ginfo.units[after_layer]
-        temp_ginfo.units.insert(after_layer,prev_layer_units)
-        return temp_ginfo
+    def insertLayer(self,after_layer,inplace = False):
 
-    def addUnits(self,layer_index,units):
+        """
+        Inserts a layer after the location given by after_layer
+        :param after_layer: index of layer after which the new layer is to be inserted
+        :param inplace: if true, it will modify the object inplace, if false it will create a new object and modify
+        :return: None if inplace is True, modified temp object if inplace is False
+        """
+        try:
+            assert (after_layer<self.layers - 1) and (after_layer > 0)
+        except AssertionError as err:
+            err.args = err.args + (" after_layer index out of bounds",)
+            raise
+        else:
+            if inplace:
+                self.layers += 1
+                prev_layer_units = self.units[after_layer]
+                self.units.insert(after_layer,prev_layer_units)
+                return None
+
+            else:
+                temp_ginfo = deepcopy(self)
+                temp_ginfo.id += 1
+                temp_ginfo.layers += 1
+                prev_layer_units = temp_ginfo.units[after_layer]
+                temp_ginfo.units.insert(after_layer, prev_layer_units)
+                return temp_ginfo
+
+    def addUnits(self,layer_index,units, inplace = False):
         """
         :param layer_index: index of layer where to add units
         :param units: no. of units to add in this layer
