@@ -44,8 +44,6 @@ class GraphInfo:
             # id of the model
             self.id = id
 
-            # dest_dir of model
-            self.dest_dir = "history/model"+str(self.id)+"/"
 
     def insert_layer(self,after_layer,inplace = False):
 
@@ -69,7 +67,6 @@ class GraphInfo:
 
             else:
                 temp_ginfo = deepcopy(self)
-                temp_ginfo.id += 1
                 temp_ginfo.layers += 1
                 prev_layer_units = temp_ginfo.units[after_layer]
                 temp_ginfo.units.insert(after_layer, prev_layer_units)
@@ -116,25 +113,27 @@ class BuildModel:
     def __init__(self,graph_info):
         """
         reads the graph structure form graph_info object,
-        retrieves weights from sub-directory
+        retrieves weights from temp_directory
         if model_id = 1, initialize weights inplace, or else extract from csv files
         """
+        tf.reset_default_graph()
+
         self.id = graph_info.id
         self.layers = graph_info.layers
         self.ls_units = graph_info.units
-        self.dir = graph_info.dest_dir
+        self.dir = "history/model"+str(self.id)+"/"
 
         # if id = 1 write random weights to directory
         if self.id == 1:
             w0 = np.random.normal(loc = 0.0, scale = 0.1, size=[784,self.ls_units[1]])
             w1 = np.random.normal(loc = 0.0, scale = 0.1, size = [self.ls_units[1],10])
-            np.savetxt(self.dir+"w0.csv",w0,delimiter=",")
-            np.savetxt(self.dir+"w1.csv",w1,delimiter= ",")
+            np.savetxt("temp/"+"w0.csv",w0,delimiter=",")
+            np.savetxt("temp/"+"w1.csv",w1,delimiter= ",")
 
-        # retrieve weights from sub-directory
+        # retrieve weights from temp directory
         self.weights = [0]*(self.layers-1)
         for i in range(self.layers-1):
-            temp_fname = self.dir +"w"+str(i)+".csv"
+            temp_fname = "temp/" +"w"+str(i)+".csv"
             self.weights[i] = tf.constant(np.genfromtxt(temp_fname,delimiter=",").astype(np.float32))
 
     def forward(self,x):
@@ -153,8 +152,9 @@ class BuildModel:
         return prediction,l[self.layers-2]
 
     def train(self,epochs):
-        x = tf.placeholder(tf.float32,shape = [None,784],name = "input_img")
-        y_true = tf.placeholder(tf.float32,shape = [None,10], name = "true_cls")
+        with tf.variable_scope("inputs"):
+            x = tf.placeholder(tf.float32,shape = [None,784],name = "input_img")
+            y_true = tf.placeholder(tf.float32,shape = [None,10], name = "true_cls")
 
         y_true_cls = tf.argmax(y_true)
 
@@ -162,9 +162,13 @@ class BuildModel:
 
         pred_cls = tf.argmax(pred)
         acc = tf.reduce_sum(tf.cast(tf.equal(y_true_cls,pred_cls),tf.int8),name = "accuracy")
-
+        tf.summary.scalar("Accuracy",acc)
         cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels =y_true, logits =logits,name = "cost"))
         opt = tf.train.AdamOptimizer(1e-2).minimize(loss = cost,name = "Optimizer")
+
+        saver = tf.train.Saver()
+        merged = tf.summary.merge_all()
+        writer = tf.summary.FileWriter(self.dir+"checkpoint", graph=tf.get_default_graph())
 
         # train the network, for every epoch display the accuracy on test set.
         with tf.Session() as sess:
@@ -179,18 +183,20 @@ class BuildModel:
                 train_acc,loss,_ = sess.run([acc,cost,opt],feed_dict=train_dict)
 
                 test_dict = {x: test_data.X, y_true: test_data.Y}
-                test_acc = sess.run(acc,feed_dict=test_dict)
-
+                test_acc,summary = sess.run([acc,merged],feed_dict=test_dict)
+                writer.add_summary(summary,i)
                 print("Epoch: ",i,"\tcost: ",loss,"\ttrain_acc: ",train_acc,"\ttest_acc: ",test_acc)
 
             self.new_kernel = sess.run(self.kernel)
+            save_path = self.dir +"checkpoint/model"
+            saver.save(sess,save_path)
+
             write_temp(self.new_kernel)
 
     def write_weights(self):
         temp_count = 0
         for arr in self.new_kernel:
             temp_fname = self.dir +"w"+str(temp_count)+".csv"
-            os.remove(temp_fname)
             np.savetxt(temp_fname,arr,delimiter=",")
             temp_count += 1
 
@@ -205,7 +211,7 @@ class Net2Net:
         :param graphinfo: self-explanatory
         :param layer_index: index of layer(starting at 0) where the units are added.
         :param units: no. of units to be added.
-        :return: updated weight matrices
+        :return: a new GraphInfo obj with added units
         """
         try:
             assert units > 0
@@ -213,6 +219,8 @@ class Net2Net:
             err.args = err.args + ("Cannot shrink, enter a positive number for units",)
             raise
         else:
+            temp_obj = deepcopy(graphinfo)
+            temp_obj.add_units(layer_index,units,inplace = True)
             prev_layers = graphinfo.layers
             # fetch the weight matrices in all layers
             weights = []
@@ -252,7 +260,7 @@ class Net2Net:
                 weights[layer_index] = np.vstack((weights[layer_index],new_row))
 
             write_temp(weights)
-            return weights
+            return temp_obj
 
     @staticmethod
     def net2deeper(graphinfo, layer_index):
@@ -262,6 +270,8 @@ class Net2Net:
         :param layer_index: index of layer after which the new layer is created
         :return weight matrices of all layers including the newly created one.
         """
+        temp_obj = deepcopy(graphinfo)
+        temp_obj.insert_layer(layer_index,inplace=True)
 
         prev_layers = graphinfo.layers
         prev_units = graphinfo.units
@@ -279,9 +289,31 @@ class Net2Net:
         weights.insert(layer_index,id_matrix)
         write_temp(weights)
 
-        return weights
+        return temp_obj
 
 
+def main():
+    obj1 = GraphInfo(id = 1, layers = 3, ls_units = [784,5,10])
+    model_1 = BuildModel(obj1)
+    model_1.train(15)
+    model_1.write_weights()
+
+    obj2 = Net2Net.net2wider(obj1,1,4)
+    obj2 = Net2Net.net2deeper(obj2,1)
+    obj2.id = 2
+
+    model_2 = BuildModel(obj2)
+    model_2.train(15)
+    model_2.write_weights()
+
+    obj3 = Net2Net.net2wider(obj2, 1, 4)
+    obj3 = Net2Net.net2wider(obj3, 2, 4)
+    obj3 = Net2Net.net2deeper(obj3, 2)
+    obj3.id = 3
+
+    model_3 = BuildModel(obj3)
+    model_3.train(15)
+    model_3.write_weights()
 
 
-
+main()
