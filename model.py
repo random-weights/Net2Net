@@ -5,15 +5,25 @@ import shutil
 from copy import deepcopy
 
 
-def write_temp(weights):
+def refresh_dir(dir):
     try:
-        shutil.rmtree("temp")
-    except Exception:
+        shutil.rmtree(dir, ignore_errors=True)
+    except IOError:
         pass
     finally:
-        os.mkdir("temp")
+        os.mkdir(dir)
+
+
+def write_temp(weights):
+    """
+    Function will delete and recreate temp folder before it writes the weight matrices
+    :param weights:
+    :return: None
+    """
 
     temp_destination = "temp/"
+    refresh_dir(temp_destination)
+
     for count, arr in enumerate(weights):
         arr = np.array(arr)
         temp_fname = temp_destination + "w" + str(count) + ".csv"
@@ -23,7 +33,7 @@ def write_temp(weights):
 class GraphInfo:
     def __init__(self,id,layers,ls_units):
         """
-        every instance of Graphinfo will create a new model directory
+        Why do I need this class, i'm still trying to find a rationale.
         :param id: id of the model
         :param layers: no. of layers including input and output int8
         :param ls_units: a list of no. of units in each layer
@@ -44,7 +54,6 @@ class GraphInfo:
             # id of the model
             self.id = id
 
-
     def insert_layer(self,after_layer,inplace = False):
 
         """
@@ -54,7 +63,7 @@ class GraphInfo:
         :return: None if inplace is True, modified temp object if inplace is False
         """
         try:
-            assert (after_layer<self.layers - 1) and (after_layer > 0)
+            assert (after_layer < (self.layers - 1)) and (after_layer >= 0)
         except AssertionError as err:
             err.args = err.args + (" after_layer index out of bounds",)
             raise
@@ -92,9 +101,9 @@ class GraphInfo:
                 temp_ginfo.units[layer_index] += units
                 return temp_ginfo
 
-    def print_info(self):
-        print("ID: ",self.id,"\tunits: ",self.units,"\tlayers: ",self.layers)
-        return None
+    def get_info(self):
+        str = "ID: {}\tlayers: {}\tunits: {}".format(self.id,self.layers,self.units)
+        return str
 
 
 class Data:
@@ -105,16 +114,14 @@ class Data:
 
 class BuildModel:
     """
-    By default when a model finishes training, it creates a temp folder.
-    If temp folder already exists, it is deleted and then weights are written.
-
+    after training, weights are written to temp folder.
     To explicity write weight matrices to model directory, use writeWeights() method.
     """
     def __init__(self,graph_info):
         """
         reads the graph structure form graph_info object,
+        if model_id = 1, write weights to temp folder.
         retrieves weights from temp_directory
-        if model_id = 1, initialize weights inplace, or else extract from csv files
         """
         tf.reset_default_graph()
 
@@ -123,8 +130,12 @@ class BuildModel:
         self.ls_units = graph_info.units
         self.dir = "history/model"+str(self.id)+"/"
 
-        # if id = 1 write random weights to directory
+        # refresh model sub-directory
+        refresh_dir(self.dir)
+
+        # if id = 1 write random weights to temp directory
         if self.id == 1:
+            refresh_dir("temp")
             w0 = np.random.normal(loc = 0.0, scale = 0.1, size=[784,self.ls_units[1]])
             w1 = np.random.normal(loc = 0.0, scale = 0.1, size = [self.ls_units[1],10])
             np.savetxt("temp/"+"w0.csv",w0,delimiter=",")
@@ -194,6 +205,10 @@ class BuildModel:
             write_temp(self.new_kernel)
 
     def write_weights(self):
+        """
+        writes weight matrices to model sub-directory
+        :return:None
+        """
         temp_count = 0
         for arr in self.new_kernel:
             temp_fname = self.dir +"w"+str(temp_count)+".csv"
@@ -292,28 +307,9 @@ class Net2Net:
         return temp_obj
 
 
-def main():
-    obj1 = GraphInfo(id = 1, layers = 3, ls_units = [784,5,10])
-    model_1 = BuildModel(obj1)
-    model_1.train(15)
-    model_1.write_weights()
-
-    obj2 = Net2Net.net2wider(obj1,1,4)
-    obj2 = Net2Net.net2deeper(obj2,1)
-    obj2.id = 2
-
-    model_2 = BuildModel(obj2)
-    model_2.train(15)
-    model_2.write_weights()
-
-    obj3 = Net2Net.net2wider(obj2, 1, 4)
-    obj3 = Net2Net.net2wider(obj3, 2, 4)
-    obj3 = Net2Net.net2deeper(obj3, 2)
-    obj3.id = 3
-
-    model_3 = BuildModel(obj3)
-    model_3.train(15)
-    model_3.write_weights()
-
-
-main()
+if __name__ == "__main__":
+    print("Use the main.py to test the model and for example")
+    obj1 = GraphInfo(id = 1, layers = 3, ls_units=[784,30,10])
+    model1 = BuildModel(obj1)
+    model1.train(20)
+    model1.write_weights()

@@ -7,11 +7,19 @@ import yaml
 2. Will also delete any existing files and directories.
 """
 
-hist_dir = "history"
-try:
-    shutil.rmtree(hist_dir,ignore_errors=True)
-except:
-    pass
-finally:
-    os.mkdir(hist_dir)
 
+def set_workspace():
+    hist_dir = "history"
+    temp_dir = "temp"
+    try:
+        shutil.rmtree(hist_dir,ignore_errors=True)
+        shutil.rmtree(temp_dir,ignore_errors = True)
+    except Exception:
+        pass
+    finally:
+        os.mkdir(hist_dir)
+        os.mkdir(temp_dir)
+
+
+if __name__ == "__main__":
+    set_workspace()
