@@ -14,22 +14,6 @@ def refresh_dir(dir):
         os.mkdir(dir)
 
 
-def write_temp(weights):
-    """
-    Function will delete and recreate temp folder before it writes the weight matrices
-    :param weights:
-    :return: None
-    """
-
-    temp_destination = "temp/"
-    refresh_dir(temp_destination)
-
-    for count, arr in enumerate(weights):
-        arr = np.array(arr)
-        temp_fname = temp_destination + "w" + str(count) + ".csv"
-        np.savetxt(temp_fname, arr, delimiter=",")
-
-
 class GraphInfo:
     def __init__(self,id,layers,ls_units):
         """
@@ -117,6 +101,7 @@ class BuildModel:
     after training, weights are written to temp folder.
     To explicity write weight matrices to model directory, use writeWeights() method.
     """
+
     def __init__(self,graph_info):
         """
         reads the graph structure form graph_info object,
@@ -130,9 +115,10 @@ class BuildModel:
         self.ls_units = graph_info.units
         self.dir = "history/model"+str(self.id)+"/"
 
-        # refresh model sub-directory
-        refresh_dir(self.dir)
+        # instantiate variables to use in other methods
+        self.weights = []
 
+        refresh_dir(self.dir)
         # if id = 1 write random weights to temp directory
         if self.id == 1:
             refresh_dir("temp")
@@ -141,41 +127,43 @@ class BuildModel:
             np.savetxt("temp/"+"w0.csv",w0,delimiter=",")
             np.savetxt("temp/"+"w1.csv",w1,delimiter= ",")
 
-        # retrieve weights from temp directory
+    def fetch_weights(self):
+        """
+        retrieves weights from temp directory to be used when you create a model.
+        :return: weight matrices as one list
+        """
+
         self.weights = [0]*(self.layers-1)
         for i in range(self.layers-1):
             temp_fname = "temp/" +"w"+str(i)+".csv"
             self.weights[i] = tf.constant(np.genfromtxt(temp_fname,delimiter=",").astype(np.float32))
+        return self.weights
 
-    def forward(self,x):
+    def forward(self, x):
         self.kernel = [0]*(self.layers-1)
         l = [0]*(self.layers-1)
-        l_relu = [0]*(self.layers)
+        l_relu = [0]*self.layers
         l_relu[0] = x
         for i in range(self.layers-1):
-            with tf.variable_scope("layer"+str(i)):
-                self.kernel[i] = tf.get_variable(name = "weight"+str(i),
-                                                 initializer=self.weights[i],trainable=True)
-                l[i] = tf.matmul(l_relu[i],self.kernel[i],name = "matmul")
+            with tf.variable_scope("layer"+str(i), reuse=tf.AUTO_REUSE):
+                self.kernel[i] = tf.get_variable(name="weight"+str(i),
+                                                 initializer=self.weights[i], trainable=True)
+                l[i] = tf.matmul(l_relu[i], self.kernel[i], name="matmul")
                 l_relu[i+1] = tf.nn.relu(l[i])
         prediction = tf.nn.softmax(l[self.layers-2])
 
-        return prediction,l[self.layers-2]
+        return prediction, l[self.layers-2]
 
     def train(self,epochs):
         with tf.variable_scope("inputs"):
             x = tf.placeholder(tf.float32,shape = [None,784],name = "input_img")
             y_true = tf.placeholder(tf.float32,shape = [None,10], name = "true_cls")
 
-        y_true_cls = tf.argmax(y_true)
-
         pred,logits = self.forward(x)
 
-        pred_cls = tf.argmax(pred)
-        acc = tf.reduce_sum(tf.cast(tf.equal(y_true_cls,pred_cls),tf.int8),name = "accuracy")
-        tf.summary.scalar("Accuracy",acc)
         cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits_v2(labels =y_true, logits =logits,name = "cost"))
         opt = tf.train.AdamOptimizer(1e-2).minimize(loss = cost,name = "Optimizer")
+        tf.summary.scalar("cost",cost)
 
         saver = tf.train.Saver()
         merged = tf.summary.merge_all()
@@ -184,36 +172,53 @@ class BuildModel:
         # train the network, for every epoch display the accuracy on test set.
         with tf.Session() as sess:
             train_data = Data(x_fname=r"D:\data\mnist\x_train.csv", y_fname=r"D:\data\mnist\y_train.csv")
-            test_data = Data(x_fname=r"D:\data\mnist\x_test.csv", y_fname=r"D:\data\mnist\y_test.csv")
 
             sess.run(tf.global_variables_initializer())
             sess.run(tf.local_variables_initializer())
+
             for i in range(epochs):
-
                 train_dict = {x:train_data.X, y_true:train_data.Y}
-                train_acc,loss,_ = sess.run([acc,cost,opt],feed_dict=train_dict)
-
-                test_dict = {x: test_data.X, y_true: test_data.Y}
-                test_acc,summary = sess.run([acc,merged],feed_dict=test_dict)
+                loss,_,summary = sess.run([cost,opt,merged],feed_dict=train_dict)
                 writer.add_summary(summary,i)
-                print("Epoch: ",i,"\tcost: ",loss,"\ttrain_acc: ",train_acc,"\ttest_acc: ",test_acc)
+                print("Epoch: ",i,"\tcost: ",loss)
 
-            self.new_kernel = sess.run(self.kernel)
-            save_path = self.dir +"checkpoint/model"
-            saver.save(sess,save_path)
+            save_path = self.dir + "checkpoint/model"
+            saver.save(sess, save_path)
+            self.weights = sess.run(self.kernel)
+        self.write_weights()
 
-            write_temp(self.new_kernel)
+    def inference(self, input):
+        tf.reset_default_graph()
+        x = tf.placeholder(tf.float32,shape = [None,784],name = "input")
+        pred, _ = self.forward(x)
+        pred_cls = tf.argmax(pred,axis = 1)
+        with tf.Session() as sess:
+            sess.run(tf.global_variables_initializer())
+            sess.run(tf.local_variables_initializer())
+            return sess.run(pred_cls, feed_dict={x: input})
 
-    def write_weights(self):
+    def test_accuracy(self, input, true_output):
+        pass
+
+    def write_weights(self,write_to_temp=True):
         """
-        writes weight matrices to model sub-directory
+        writes weight matrices to directory
+        if write_to_temp is True, then it is written to temp directory.
+        else it is written to model subdirectory
         :return:None
         """
-        temp_count = 0
-        for arr in self.new_kernel:
-            temp_fname = self.dir +"w"+str(temp_count)+".csv"
-            np.savetxt(temp_fname,arr,delimiter=",")
-            temp_count += 1
+        if write_to_temp:
+            dir = "temp/"
+        else:
+            dir = self.dir
+
+        refresh_dir(dir)
+
+        count = 0
+        for arr in self.weights:
+            fname = dir +"w"+str(count)+".csv"
+            np.savetxt(fname,arr,delimiter=",")
+            count += 1
 
 
 class Net2Net:
@@ -307,9 +312,4 @@ class Net2Net:
         return temp_obj
 
 
-if __name__ == "__main__":
-    print("Use the main.py to test the model and for example")
-    obj1 = GraphInfo(id = 1, layers = 3, ls_units=[784,30,10])
-    model1 = BuildModel(obj1)
-    model1.train(20)
-    model1.write_weights()
+
